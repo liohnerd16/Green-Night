@@ -18,6 +18,10 @@ import { translations as tr } from "../i18n/translations";
 
 const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-570355f0`;
 
+export function getAdminToken(): string | null {
+  return sessionStorage.getItem("adminToken");
+}
+
 export function AdminLogin({ isAdmin, onLoginSuccess, onLogout }) {
   const t = useT();
   const [open, setOpen] = useState(false);
@@ -49,11 +53,33 @@ export function AdminLogin({ isAdmin, onLoginSuccess, onLogout }) {
         body: JSON.stringify({ password }),
       });
       const data = await response.json();
-      if (response.ok && data.success) {
+      if (response.ok && data.success && data.token) {
+        sessionStorage.setItem("adminToken", data.token);
         onLoginSuccess();
         setPassword("");
         setOpen(false);
         toast.success(t(tr.admin.loginSuccess));
+      } else if (response.status === 403) {
+        // Admin not set up — attempt setup
+        const setupResponse = await fetch(`${API_URL}/admin/setup`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${publicAnonKey}`,
+          },
+          body: JSON.stringify({ password }),
+        });
+        const setupData = await setupResponse.json();
+        if (setupResponse.ok && setupData.success && setupData.token) {
+          sessionStorage.setItem("adminToken", setupData.token);
+          onLoginSuccess();
+          setPassword("");
+          setOpen(false);
+          toast.success(t(tr.admin.loginSuccess));
+        } else {
+          toast.error(setupData.error || t(tr.admin.loginFailed));
+          setPassword("");
+        }
       } else {
         toast.error(data.error || t(tr.admin.loginFailed));
         setPassword("");
@@ -69,17 +95,19 @@ export function AdminLogin({ isAdmin, onLoginSuccess, onLogout }) {
   const handleChangePassword = async () => {
     if (!currentPw.trim()) { toast.error(t(tr.admin.enterCurrentPassword)); return; }
     if (!newPw.trim()) { toast.error(t(tr.admin.enterNewPassword)); return; }
-    if (newPw.length < 4) { toast.error(t(tr.admin.passwordMinLength)); return; }
+    if (newPw.length < 8) { toast.error(t(tr.admin.passwordMinLength)); return; }
     if (newPw !== confirmPw) { toast.error(t(tr.admin.passwordMismatch)); return; }
     if (currentPw === newPw) { toast.error(t(tr.admin.passwordSame)); return; }
 
     setChangeLoading(true);
     try {
+      const token = getAdminToken();
       const response = await fetch(`${API_URL}/admin/change-password`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
         },
         body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }),
       });
@@ -141,14 +169,14 @@ export function AdminLogin({ isAdmin, onLoginSuccess, onLogout }) {
                     {showNewPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                {newPw && newPw.length < 4 && <p className="text-xs text-red-500">{t(tr.admin.passwordMinLength)}</p>}
+                {newPw && newPw.length < 8 && <p className="text-xs text-red-500">{t(tr.admin.passwordMinLength)}</p>}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="confirm-pw">{t(tr.admin.confirmPassword)}</Label>
                 <Input id="confirm-pw" type="password" placeholder={t(tr.admin.confirmPasswordPlaceholder)} value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} onKeyDown={handleChangePwKeyPress} />
                 {confirmPw && confirmPw !== newPw && <p className="text-xs text-red-500">{t(tr.admin.passwordMismatch)}</p>}
               </div>
-              <Button onClick={handleChangePassword} className="w-full" disabled={changeLoading || !currentPw || !newPw || newPw.length < 4 || newPw !== confirmPw}>
+              <Button onClick={handleChangePassword} className="w-full" disabled={changeLoading || !currentPw || !newPw || newPw.length < 8 || newPw !== confirmPw}>
                 {changeLoading ? (
                   <span className="flex items-center gap-2">
                     <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />

@@ -10,7 +10,7 @@ import { DraggableWebsiteItem } from "../components/DraggableWebsiteItem";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { AddWebsiteDialog } from "../components/AddWebsiteDialog";
 import { CategoryManager } from "../components/CategoryManager";
-import { AdminLogin } from "../components/AdminLogin";
+import { AdminLogin, getAdminToken } from "../components/AdminLogin";
 import { SocialLinks } from "../components/SocialLinks";
 import { PageTransition } from "../components/PageTransition";
 import { Sparkles, Settings, CalendarDays, ChevronRight, GripVertical, Save, ArrowLeft } from "lucide-react";
@@ -93,9 +93,18 @@ export function HomePage() {
       document.documentElement.classList.add("dark");
     }
 
-    const adminStatus = sessionStorage.getItem("isAdmin");
-    if (adminStatus === "true") {
-      setIsAdmin(true);
+    // Verify admin token with the server
+    const token = getAdminToken();
+    if (token) {
+      fetch(`${API_URL}/admin/verify`, {
+        headers: {
+          Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token,
+        },
+      })
+        .then((r) => r.json())
+        .then((data) => { if (data.valid) setIsAdmin(true); else sessionStorage.removeItem("adminToken"); })
+        .catch(() => { sessionStorage.removeItem("adminToken"); });
     }
   }, []);
 
@@ -181,11 +190,13 @@ export function HomePage() {
 
   const handleAddWebsite = async (websiteData) => {
     try {
+      const token = getAdminToken();
       const response = await fetch(`${API_URL}/websites`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
         },
         body: JSON.stringify(websiteData),
       });
@@ -200,6 +211,7 @@ export function HomePage() {
 
   const handleUpdateWebsite = async (updatedWebsite) => {
     try {
+      const token = getAdminToken();
       const response = await fetch(
         `${API_URL}/websites/${updatedWebsite.id}`,
         {
@@ -207,6 +219,7 @@ export function HomePage() {
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${publicAnonKey}`,
+            "X-Admin-Token": token || "",
           },
           body: JSON.stringify(updatedWebsite),
         }
@@ -222,9 +235,13 @@ export function HomePage() {
 
   const handleDeleteWebsite = async (websiteId) => {
     try {
+      const token = getAdminToken();
       const response = await fetch(`${API_URL}/websites/${websiteId}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: {
+          Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
+        },
       });
       if (!response.ok) throw new Error("Failed to delete website");
       setWebsites(websites.filter((w) => w.id !== websiteId));
@@ -361,15 +378,28 @@ export function HomePage() {
 
   const handleAdminLogin = () => {
     setIsAdmin(true);
-    sessionStorage.setItem("isAdmin", "true");
   };
 
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
+    try {
+      const token = getAdminToken();
+      if (token) {
+        await fetch(`${API_URL}/admin/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+            "X-Admin-Token": token,
+          },
+        });
+      }
+    } catch {
+      // Best-effort logout
+    }
+    sessionStorage.removeItem("adminToken");
     setIsAdmin(false);
     setAdminMode(false);
     setDragEnabled(false);
     setHasOrderChanged(false);
-    sessionStorage.removeItem("isAdmin");
     toast.success(t(tr.admin.logoutSuccess));
   };
 
@@ -385,11 +415,13 @@ export function HomePage() {
   const handleAddCategory = async (name) => {
     setCustomCategories((prev) => [...prev, name]);
     try {
+      const token = getAdminToken();
       await fetch(`${API_URL}/categories`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
         },
         body: JSON.stringify({ name }),
       });
@@ -410,9 +442,13 @@ export function HomePage() {
       setCustomCategories((prev) => [...prev.filter((c) => c !== name), "Khác"]);
     }
     try {
+      const token = getAdminToken();
       await fetch(`${API_URL}/categories/${encodeURIComponent(name)}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${publicAnonKey}` },
+        headers: {
+          Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
+        },
       });
     } catch (error) {
       console.warn("Failed to delete category on server:", error);
@@ -429,11 +465,13 @@ export function HomePage() {
       )
     );
     try {
+      const token = getAdminToken();
       await fetch(`${API_URL}/categories/rename`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
         },
         body: JSON.stringify({ oldName, newName }),
       });
@@ -460,11 +498,13 @@ export function HomePage() {
     setSavingOrder(true);
     try {
       const orderedIds = websites.map((w) => w.id);
+      const token = getAdminToken();
       const response = await fetch(`${API_URL}/websites/reorder`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token || "",
         },
         body: JSON.stringify({ orderedIds }),
       });

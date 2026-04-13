@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { PageTransition } from "../components/PageTransition";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { LanguageToggle } from "../components/LanguageToggle";
-import { AdminLogin } from "../components/AdminLogin";
+import { AdminLogin, getAdminToken } from "../components/AdminLogin";
 import { SocialLinks } from "../components/SocialLinks";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { Button } from "../components/ui/button";
@@ -202,7 +202,18 @@ export function AboutPage() {
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme === "dark" || (!savedTheme && window.matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.classList.add("dark");
-    if (sessionStorage.getItem("isAdmin") === "true") setIsAdmin(true);
+    const token = getAdminToken();
+    if (token) {
+      fetch(`${API_URL}/admin/verify`, {
+        headers: {
+          Authorization: `Bearer ${publicAnonKey}`,
+          "X-Admin-Token": token,
+        },
+      })
+        .then((r) => r.json())
+        .then((data) => { if (data.valid) setIsAdmin(true); else sessionStorage.removeItem("adminToken"); })
+        .catch(() => { sessionStorage.removeItem("adminToken"); });
+    }
   }, []);
 
   useEffect(() => { fetchAboutContent(); }, []);
@@ -218,7 +229,8 @@ export function AboutPage() {
   const saveContent = async (newContent) => {
     setContent(newContent); setSaving(true);
     try {
-      await fetch(`${API_URL}/about`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${publicAnonKey}` }, body: JSON.stringify(newContent) });
+      const token = getAdminToken();
+      await fetch(`${API_URL}/about`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${publicAnonKey}`, "X-Admin-Token": token || "" }, body: JSON.stringify(newContent) });
     } catch (error) { console.warn("Failed to save:", error); toast.error(t(tr.about.saveError)); }
     finally { setSaving(false); }
   };
@@ -230,8 +242,26 @@ export function AboutPage() {
   const handleDeleteSection = (id) => { saveContent({ ...content, sections: content.sections.filter((s) => s.id !== id) }); toast.success(t(tr.about.sectionDeleted)); };
   const handleMoveSection = (index, direction) => { const s = [...content.sections]; const ni = direction === "up" ? index - 1 : index + 1; if (ni < 0 || ni >= s.length) return; [s[index], s[ni]] = [s[ni], s[index]]; saveContent({ ...content, sections: s }); };
 
-  const handleAdminLogin = () => { setIsAdmin(true); sessionStorage.setItem("isAdmin", "true"); };
-  const handleAdminLogout = () => { setIsAdmin(false); setAdminMode(false); sessionStorage.removeItem("isAdmin"); toast.success(t(tr.admin.logoutSuccess)); };
+  const handleAdminLogin = () => { setIsAdmin(true); };
+  const handleAdminLogout = async () => {
+    try {
+      const token = getAdminToken();
+      if (token) {
+        await fetch(`${API_URL}/admin/logout`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${publicAnonKey}`,
+            "X-Admin-Token": token,
+          },
+        });
+      }
+    } catch {
+      // Best-effort logout
+    }
+    sessionStorage.removeItem("adminToken");
+    setIsAdmin(false); setAdminMode(false);
+    toast.success(t(tr.admin.logoutSuccess));
+  };
 
   if (loading) {
     return (
